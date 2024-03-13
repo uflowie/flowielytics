@@ -1,0 +1,28 @@
+[
+    8,
+    "OnJsonApiEvent",
+    {
+        "data": {
+            "action": "Idle",
+            "components": [
+                {
+                    "action": "Idle",
+                    "id": "lol_game_client_sln",
+                    "isCorrupted": false,
+                    "isUpToDate": true,
+                    "isUpdateAvailable": false,
+                    "progress": null,
+                    "timeOfLastUpToDateCheckISO8601": "2024-03-13T21:44:36Z"
+                }
+            ],
+            "id": "league_of_legends",
+            "isCorrupted": false,
+            "isStopped": false,
+            "isUpToDate": true,
+            "isUpdateAvailable": false,
+            "percentPatched": 0.0
+        },
+        "eventType": "Update",
+        "uri": "/patcher/v1/products/league_of_legends/state"
+    }
+]
