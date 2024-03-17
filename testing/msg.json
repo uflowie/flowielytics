@@ -3,26 +3,47 @@
     "OnJsonApiEvent",
     {
         "data": {
-            "action": "Idle",
-            "components": [
-                {
-                    "action": "Idle",
-                    "id": "lol_game_client_sln",
-                    "isCorrupted": false,
-                    "isUpToDate": true,
-                    "isUpdateAvailable": false,
-                    "progress": null,
-                    "timeOfLastUpToDateCheckISO8601": "2024-03-13T21:44:36Z"
-                }
-            ],
-            "id": "league_of_legends",
-            "isCorrupted": false,
-            "isStopped": false,
-            "isUpToDate": true,
-            "isUpdateAvailable": false,
-            "percentPatched": 0.0
+            "actingBackgroundAnimationState": "",
+            "activeActionType": "",
+            "areSummonerActionsComplete": false,
+            "assignedPosition": "",
+            "banIntentSquarePortratPath": "",
+            "cellId": -1,
+            "championIconStyle": "",
+            "championId": 0,
+            "championName": "",
+            "currentChampionVotePercentInteger": -1,
+            "isActingNow": false,
+            "isDonePicking": false,
+            "isOnPlayersTeam": false,
+            "isPickIntenting": false,
+            "isPlaceholder": true,
+            "isSelf": false,
+            "nameVisibilityType": "",
+            "obfuscatedPuuid": "",
+            "obfuscatedSummonerId": 0,
+            "pickSnipedClass": "",
+            "puuid": "",
+            "shouldShowActingBar": false,
+            "shouldShowBanIntentIcon": false,
+            "shouldShowExpanded": false,
+            "shouldShowRingAnimations": false,
+            "shouldShowSelectedSkin": false,
+            "shouldShowSpells": false,
+            "showMuted": false,
+            "showSwaps": false,
+            "showTrades": false,
+            "skinId": 0,
+            "skinSplashPath": "",
+            "slotId": 2,
+            "spell1IconPath": "",
+            "spell2IconPath": "",
+            "statusMessageKey": "",
+            "summonerId": 0,
+            "swapId": -1,
+            "tradeId": -1
         },
         "eventType": "Update",
-        "uri": "/patcher/v1/products/league_of_legends/state"
+        "uri": "/lol-champ-select/v1/summoners/2"
     }
 ]

@@ -1,13 +1,12 @@
+mod lcu_client;
+
 use axum::{
     response::sse::{Event, Sse},
     routing::get,
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
-use futures::{
-    stream::Stream,
-    SinkExt,
-};
+use futures::{stream::Stream, SinkExt};
 use native_tls::TlsConnector;
 use serde_json::Value;
 use std::{convert::Infallible, time::Duration};
@@ -128,6 +127,40 @@ async fn run_test_provider() -> Receiver<LCUState> {
     rx
 }
 
+async fn get_lcu_process_data(sys: &mut System) -> (String, String) {
+    // get lcu port and remoting token
+    loop {
+        sys.refresh_all();
+
+        let mut token = None;
+        let mut port = None;
+
+        for (_, process) in sys.processes() {
+            if process.name() != "LeagueClientUx.exe" {
+                continue;
+            }
+
+            for arg in process.cmd() {
+                if arg.starts_with("--remoting-auth-token") {
+                    println!("Found auth token: {}", arg);
+                    token = Some(arg.split("=").collect::<Vec<&str>>()[1].to_string());
+                }
+                if arg.starts_with("--app-port") {
+                    println!("Found app port: {}", arg);
+                    port = Some(arg.split("=").collect::<Vec<&str>>()[1].to_string());
+                }
+            }
+        }
+
+        if let (Some(token), Some(port)) = (token, port) {
+            return (token, port);
+        }
+
+        println!("Couldn't find auth token, sleeping for 1 second");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
 // this function is responsible for connecting to the lcu websocket and sending its state whenever it changes
 // returns a receiver that can be used to listen for state changes
 async fn run_provider() -> Receiver<LCUState> {
@@ -143,41 +176,10 @@ async fn run_provider() -> Receiver<LCUState> {
         let mut sys = System::new_all();
 
         loop {
-            sys.refresh_all();
-
-            let mut token = None;
-            let mut port = None;
-
-            for (_, process) in sys.processes() {
-                if process.name() != "LeagueClientUx.exe" {
-                    continue;
-                }
-
-                for arg in process.cmd() {
-                    if arg.starts_with("--remoting-auth-token") {
-                        println!("Found auth token: {}", arg);
-                        token = Some(arg.split("=").collect::<Vec<&str>>()[1].to_string());
-                    }
-                    if arg.starts_with("--app-port") {
-                        println!("Found app port: {}", arg);
-                        port = Some(arg.split("=").collect::<Vec<&str>>()[1].to_string());
-                    }
-                }
-            }
-
-            if token.is_none() || port.is_none() {
-                println!("Couldn't find auth token, sleeping for 1 second");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-
-            let token = token.unwrap();
-            let port = port.unwrap();
-            let token = format!("riot:{token}");
-
-            // base64 encode riot:token
+            let (token, port) = get_lcu_process_data(&mut sys).await;
+            
             let token = general_purpose::STANDARD.encode(&token);
-            let auth = format!("Basic {}", token);
+            let auth = format!("Basic {}", format!("riot:{token}"));
 
             let ws_addr = format!("wss://127.0.0.1:{port}");
             let mut request = ws_addr.into_client_request().unwrap();
@@ -190,7 +192,7 @@ async fn run_provider() -> Receiver<LCUState> {
                 .unwrap();
 
             // create tls connector
-            let mut connector = tokio_tungstenite::Connector::NativeTls(config);
+            let connector = tokio_tungstenite::Connector::NativeTls(config);
 
             let (mut socket, _) = tokio_tungstenite::connect_async_tls_with_config(
                 request,
@@ -201,11 +203,7 @@ async fn run_provider() -> Receiver<LCUState> {
             .await
             .expect("Failed to connect to websocket");
 
-            // connect to websocket using token
-            // let (mut socket, _) = tokio_tungstenite::connect_async(request)
-            //     .await
-            //     .expect("Failed to connect to websocket");
-
+            // subscribe to json api events
             socket
                 .send(tungstenite::Message::Text(
                     "[5, \"OnJsonApiEvent\"]".to_string(),
@@ -213,17 +211,24 @@ async fn run_provider() -> Receiver<LCUState> {
                 .await
                 .expect("Failed to send message to websocket");
 
+
             // wait on websocket for new events
             while let Some(Ok(msg)) = socket.next().await {
                 if let tungstenite::Message::Text(msg) = msg {
-                    // println!("Received message: {}", msg);
-                    println!();
+                    println!("Received message: {}\n", msg);
 
-                    if let Some(uri) = get_uri_from_lcu_event(&msg) {
-                        if uri.starts_with("/lol-gameflow/v1/session") {
-                            println!("Received message: {}", msg);
-                        println!("Received uri: {}", uri);
-                            
+                    // parse msg
+                    if let Some(msg) = lcu_client::parse_lcu_ws_message(&msg) {
+                        match msg {
+                            lcu_client::LCUResource::Summoner(summoner) => {
+                                if summoner.is_self {
+                                    println!("Found summoner: {}", summoner.champion_name);
+                                }
+                            }
+                            lcu_client::LCUResource::Gameflow(gameflow) => {
+                                println!("Found gameflow: {}", gameflow.game_data.queue.game_mode);
+                            }
+                            lcu_client::LCUResource::Other(_) => {}
                         }
                     }
                 }
@@ -233,20 +238,6 @@ async fn run_provider() -> Receiver<LCUState> {
 
     rx
 }
-
-fn get_uri_from_lcu_event(msg: &str) -> Option<String> {
-    let value: Value = serde_json::from_str(msg).ok()?;
-    value.get(2)?.get("uri")?.as_str().map(|s| s.to_string())
-}
-
-// fn parse_champ_data_from_msg(msg: &str) -> Option<(String, String)> {
-//     let value: Option<Value> = serde_json::from_str(msg).ok()?;
-//     let uri = value?.get(3)?.get("uri")?.as_str()?;
-//     let uri = uri.split("/").collect::<Vec<&str>>();
-//     let champ = uri.get(2)?.to_string();
-//     let game_mode = uri.get(3)?.to_string();
-//     Some((champ, game_mode))
-// }
 
 #[derive(Clone, Debug)]
 enum LCUState {
