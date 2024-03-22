@@ -12,6 +12,7 @@ use serde_json::Value;
 use std::{convert::Infallible, time::Duration};
 use sysinfo::System;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::watch::{self};
 use tokio::{self, select};
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite;
@@ -20,30 +21,23 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 #[tokio::main]
 async fn main() {
     let lcu_state_rx = run_test_provider().await;
-    let sub_tx = run_distributor(lcu_state_rx).await;
     let _ = run_provider().await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
 
-    let app = Router::new().route("/sse", get(move || sse_handler(sub_tx.clone())));
+    let app = Router::new().route("/sse", get(move || sse_handler(lcu_state_rx.clone())));
 
     // serve
     axum::serve(listener, app).await.unwrap();
 }
 
 async fn sse_handler(
-    sub_tx: Sender<Sender<LCUState>>,
+    rx: watch::Receiver<LCUState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let (tx, rx) = mpsc::channel(100);
 
-    sub_tx
-        .send(tx)
-        .await
-        .expect("Failed to subscribe to state changes");
-
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|state| {
+    let stream = tokio_stream::wrappers::WatchStream::new(rx).map(|state| {
         let data = match state {
             LCUState::NotConnected => "Not connected".to_string(),
             LCUState::Connected => "Connected".to_string(),
@@ -58,68 +52,22 @@ async fn sse_handler(
     Sse::new(stream)
 }
 
-// distributes the state of the lcu to all its subscribers. takes a receiver that listens for state changes
-// and returns a sender that can be used to subscribe to state changes
-async fn run_distributor(mut lcu_state_receiver: Receiver<LCUState>) -> Sender<Sender<LCUState>> {
-    let (tx, mut rx) = mpsc::channel::<Sender<LCUState>>(100);
-    let mut connections: Vec<Sender<LCUState>> = Vec::new();
-    let mut state = LCUState::NotConnected;
-
-    tokio::spawn(async move {
-        loop {
-            select! {
-                new_subscriber = rx.recv() => {
-                    if let Some(sub) = new_subscriber {
-                        println!("Received new connection");
-                        // Attempt to send initial state, if fail, do not add to connections
-                        if sub.send(state.clone()).await.is_ok() {
-                            connections.push(sub);
-                        } else {
-                            println!("Failed to send initial state, not adding to connections");
-                        }
-                    }
-                },
-                new_state = lcu_state_receiver.recv() => {
-                    state = new_state.expect("Failed to receive from channel");
-                    let mut failed_indices = Vec::new();
-
-                    for (index, conn) in connections.iter().enumerate() {
-                        if conn.send(state.clone()).await.is_err() {
-                            failed_indices.push(index);
-                        }
-                    }
-
-                    // Remove unreachable subscribers in reverse order to avoid shifting indices
-                    for index in failed_indices.iter().rev() {
-                        println!("Removing connection");
-                        connections.swap_remove(*index);
-                    }
-                }
-            }
-        }
-    });
-    tx
-}
-
-async fn run_test_provider() -> Receiver<LCUState> {
-    let (tx, rx) = mpsc::channel(100);
+async fn run_test_provider() -> watch::Receiver<LCUState> {
+    let (tx, rx) = watch::channel(LCUState::NotConnected);
 
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             tx.send(LCUState::Connected)
-                .await
                 .expect("Failed to send state from LCU-Connector");
             tokio::time::sleep(Duration::from_secs(1)).await;
             tx.send(LCUState::Playing {
                 champion: "Yasuo".to_string(),
                 game_mode: "Ranked".to_string(),
             })
-            .await
             .expect("Failed to send state from LCU-Connector");
             tokio::time::sleep(Duration::from_secs(1)).await;
             tx.send(LCUState::NotConnected)
-                .await
                 .expect("Failed to send state from LCU-Connector");
         }
     });
@@ -163,21 +111,21 @@ async fn get_lcu_process_data(sys: &mut System) -> (String, String) {
 
 // this function is responsible for connecting to the lcu websocket and sending its state whenever it changes
 // returns a receiver that can be used to listen for state changes
-async fn run_provider() -> Receiver<LCUState> {
+async fn run_provider() -> watch::Receiver<LCUState> {
     // open questions: if the connection is lost, do we tell the receiver right away? i feel like i really only
     // want to know if i can tell for sure that the league client has been closed and maybe not even then? would be
     // more of a visual debugging thing at the end of the day. there is a case for only showing the disconnected/connected states
     // when no games have been played since the program started. if a game has been played before, the most practical behavior is
     // to just display that champ-game pair until the program is shut down
 
-    let (tx, rx) = mpsc::channel(100);
+    let (tx, rx) = watch::channel(LCUState::NotConnected);
 
     tokio::spawn(async move {
         let mut sys = System::new_all();
 
         loop {
             let (token, port) = get_lcu_process_data(&mut sys).await;
-            
+
             let token = general_purpose::STANDARD.encode(&token);
             let auth = format!("Basic {}", format!("riot:{token}"));
 
@@ -210,7 +158,6 @@ async fn run_provider() -> Receiver<LCUState> {
                 ))
                 .await
                 .expect("Failed to send message to websocket");
-
 
             // wait on websocket for new events
             while let Some(Ok(msg)) = socket.next().await {
