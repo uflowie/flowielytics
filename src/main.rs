@@ -9,12 +9,10 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use futures::{stream::Stream, SinkExt};
 use native_tls::TlsConnector;
-use serde_json::Value;
 use std::{convert::Infallible, time::Duration};
 use sysinfo::System;
-use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::watch::{self};
-use tokio::{self, select};
+use tokio::{self};
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -22,8 +20,7 @@ use tower_http::services::ServeFile;
 
 #[tokio::main]
 async fn main() {
-    let lcu_state_rx = run_test_provider().await;
-    let _ = run_provider().await;
+    let lcu_state_rx = run_provider().await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -48,7 +45,6 @@ struct ConnectedTemplate;
 async fn sse_handler(
     rx: watch::Receiver<LCUState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-
     let stream = tokio_stream::wrappers::WatchStream::new(rx).map(|state| {
         let data = match state {
             LCUState::NotConnected => NotConnectedTemplate.render_sse().unwrap(),
@@ -89,30 +85,7 @@ fn get_iframe(champion: &str, game_mode: &str) -> String {
     .replace(" ", "")
     .to_lowercase();
     let game_mode = game_mode.replace(" ", "").to_lowercase();
-    format!("<iframe src=\"https://lolalytics.com/lol/{champion}/{game_mode}/build/?patch=30\" class=\"h-screen w-full aspect-auto hidden\"></iframe>")
-}
-
-async fn run_test_provider() -> watch::Receiver<LCUState> {
-    let (tx, rx) = watch::channel(LCUState::NotConnected);
-
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            tx.send(LCUState::Connected)
-                .expect("Failed to send state from LCU-Connector");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            tx.send(LCUState::Playing {
-                champion: "Yasuo".to_string(),
-                game_mode: "Ranked".to_string(),
-            })
-            .expect("Failed to send state from LCU-Connector");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            tx.send(LCUState::NotConnected)
-                .expect("Failed to send state from LCU-Connector");
-        }
-    });
-
-    rx
+    format!("<iframe src=\"https://lolalytics.com/lol/{champion}/{game_mode}/build/?patch=30\" class=\"h-screen w-full aspect-auto\"></iframe>")
 }
 
 async fn get_lcu_process_data(sys: &mut System) -> (String, String) {
@@ -152,11 +125,8 @@ async fn get_lcu_process_data(sys: &mut System) -> (String, String) {
 // this function is responsible for connecting to the lcu websocket and sending its state whenever it changes
 // returns a receiver that can be used to listen for state changes
 async fn run_provider() -> watch::Receiver<LCUState> {
-    // open questions: if the connection is lost, do we tell the receiver right away? i feel like i really only
-    // want to know if i can tell for sure that the league client has been closed and maybe not even then? would be
-    // more of a visual debugging thing at the end of the day. there is a case for only showing the disconnected/connected states
-    // when no games have been played since the program started. if a game has been played before, the most practical behavior is
-    // to just display that champ-game pair until the program is shut down
+    let mut last_champ = "".to_string();
+    let mut last_game_mode = "".to_string();
 
     let (tx, rx) = watch::channel(LCUState::NotConnected);
 
@@ -166,8 +136,10 @@ async fn run_provider() -> watch::Receiver<LCUState> {
         loop {
             let (token, port) = get_lcu_process_data(&mut sys).await;
 
-            let token = general_purpose::STANDARD.encode(&token);
-            let auth = format!("Basic {}", format!("riot:{token}"));
+            let token = general_purpose::STANDARD.encode(format!("riot:{token}"));
+            let auth = format!("Basic {}", token);
+
+            println!("auth token: {}", auth);
 
             let ws_addr = format!("wss://127.0.0.1:{port}");
             let mut request = ws_addr.into_client_request().unwrap();
@@ -197,7 +169,7 @@ async fn run_provider() -> watch::Receiver<LCUState> {
                     "[5, \"OnJsonApiEvent\"]".to_string(),
                 ))
                 .await
-                .expect("Failed to send message to websocket");
+                .expect("Failed to send initial message to websocket");
 
             // wait on websocket for new events
             while let Some(Ok(msg)) = socket.next().await {
@@ -208,12 +180,35 @@ async fn run_provider() -> watch::Receiver<LCUState> {
                     if let Some(msg) = lcu_client::parse_lcu_ws_message(&msg) {
                         match msg {
                             lcu_client::LCUResource::Summoner(summoner) => {
-                                if summoner.is_self {
-                                    println!("Found summoner: {}", summoner.champion_name);
+                                let champion_name = summoner.champion_name;
+                                if !summoner.is_self
+                                    || champion_name == ""
+                                    || champion_name == last_champ
+                                {
+                                    continue;
+                                }
+                                last_champ = champion_name;
+                                if last_game_mode != "" {
+                                    tx.send(LCUState::Playing {
+                                        champion: last_champ.clone(),
+                                        game_mode: last_game_mode.clone(),
+                                    })
+                                    .unwrap();
                                 }
                             }
                             lcu_client::LCUResource::Gameflow(gameflow) => {
-                                println!("Found gameflow: {}", gameflow.game_data.queue.game_mode);
+                                let queue_name = gameflow.game_data.queue.game_mode;
+                                if queue_name == last_game_mode || queue_name == "" {
+                                    continue;
+                                }
+                                last_game_mode = queue_name;
+                                if last_champ != "" {
+                                    tx.send(LCUState::Playing {
+                                        champion: last_champ.clone(),
+                                        game_mode: last_game_mode.clone(),
+                                    })
+                                    .unwrap();
+                                }
                             }
                             lcu_client::LCUResource::Other(_) => {}
                         }
