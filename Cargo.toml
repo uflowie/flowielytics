@@ -9,7 +9,7 @@ edition = "2021"
 axum = "0.7.4"
 futures = "0.3.30"
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1.14"
+tokio-stream = {version = "0.1.14", features = ["sync"]}
 sysinfo = "0.30.5"
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 http = "1.1.0"
