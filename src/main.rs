@@ -1,5 +1,6 @@
 mod lcu_client;
 
+use askama::Template;
 use axum::{
     response::sse::{Event, Sse},
     routing::get,
@@ -16,6 +17,7 @@ use tokio::{self, select};
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tower_http::services::ServeFile;
 
 #[tokio::main]
 async fn main() {
@@ -27,11 +29,21 @@ async fn main() {
         .await
         .unwrap();
 
-    let app = Router::new().route("/sse", get(move || sse_handler(sub_tx.clone())));
+    let app = Router::new()
+        .route("/sse", get(move || sse_handler(sub_tx.clone())))
+        .route_service("/", ServeFile::new("assets/index.html"));
 
     // serve
     axum::serve(listener, app).await.unwrap();
 }
+
+#[derive(Template)]
+#[template(path = "not-connected.html")]
+struct NotConnectedTemplate;
+
+#[derive(Template)]
+#[template(path = "connected.html")]
+struct ConnectedTemplate;
 
 async fn sse_handler(
     sub_tx: Sender<Sender<LCUState>>,
@@ -45,17 +57,45 @@ async fn sse_handler(
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|state| {
         let data = match state {
-            LCUState::NotConnected => "Not connected".to_string(),
-            LCUState::Connected => "Connected".to_string(),
+            LCUState::NotConnected => NotConnectedTemplate.render_sse().unwrap(),
+            LCUState::Connected => ConnectedTemplate.render_sse().unwrap(),
             LCUState::Playing {
                 champion,
                 game_mode,
-            } => format!("Playing {} in {}", champion, game_mode),
+            } => get_iframe(&champion, &game_mode),
         };
+
         Ok(Event::default().data(data))
     });
 
     Sse::new(stream)
+}
+
+fn get_iframe(champion: &str, game_mode: &str) -> String {
+    let champion = match champion {
+        "Dr. Mundo" => "drmundo",
+        "Renata Glasc" => "renata",
+        "Nunu & Willump" => "nunu",
+        _ => champion,
+    }
+    .replace(" ", "")
+    .to_lowercase();
+    let game_mode = game_mode.replace(" ", "").to_lowercase();
+    format!("<iframe src=\"https://lolalytics.com/lol/{champion}/{game_mode}/build/?patch=30\" class=\"h-screen w-full aspect-auto hidden\"></iframe>")
+}
+
+trait SseTemplate {
+    fn render_sse(&self) -> askama::Result<String>;
+}
+
+impl<T> SseTemplate for T
+where
+    T: Template,
+{
+    fn render_sse(&self) -> askama::Result<String> {
+        self.render()
+            .map(|x| x.chars().filter(|&c| c != '\n' && c != '\r').collect())
+    }
 }
 
 // distributes the state of the lcu to all its subscribers. takes a receiver that listens for state changes
@@ -177,7 +217,7 @@ async fn run_provider() -> Receiver<LCUState> {
 
         loop {
             let (token, port) = get_lcu_process_data(&mut sys).await;
-            
+
             let token = general_purpose::STANDARD.encode(&token);
             let auth = format!("Basic {}", format!("riot:{token}"));
 
@@ -210,7 +250,6 @@ async fn run_provider() -> Receiver<LCUState> {
                 ))
                 .await
                 .expect("Failed to send message to websocket");
-
 
             // wait on websocket for new events
             while let Some(Ok(msg)) = socket.next().await {

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flowielytics</title>
+</head>
+<body class="bg-zinc-800">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.11"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.11/dist/ext/sse.js"></script>
+    
+    <div hx-ext="sse" sse-connect="/sse" sse-swap="message">
+    </div>
+
+</body>
+</html>
