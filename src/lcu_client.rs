@@ -163,7 +163,7 @@ async fn get_resource_stream(
 }
 
 #[derive(Deserialize)]
-struct LCUEvent(i32, String, LCUEventData);
+struct LCUEvent(#[allow(unused)] i32, #[allow(unused)] String, LCUEventData);
 
 #[derive(Deserialize)]
 struct LCUEventData {
@@ -181,23 +181,23 @@ enum LCUResource {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Summoner {
-    pub is_self: bool,
-    pub champion_name: String,
+    is_self: bool,
+    champion_name: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Gameflow {
-    pub game_data: GameData,
+    game_data: GameData,
 }
 
 #[derive(Deserialize)]
 struct GameData {
-    pub queue: Queue,
+    queue: Queue,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Queue {
-    pub game_mode: String,
+    game_mode: String,
 }
