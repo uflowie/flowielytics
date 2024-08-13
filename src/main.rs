@@ -2,22 +2,22 @@ mod lcu_client;
 mod statistics_providers;
 mod templates;
 
-use std::convert::Infallible;
+use std::{collections::HashMap, convert::Infallible};
 
+use askama::Template;
 use axum::{
-    extract::State,
-    response::sse::{Event, Sse},
+    extract::{Path, Query, State},
+    response::{sse::{Event, Sse}, Html, IntoResponse},
     routing::get,
     Router,
 };
 use futures::stream::Stream;
 use lcu_client::{run_lcu_client, LCUState};
 use statistics_providers::{Lolalytics, StatisticsUrlProducer};
-use templates::{ConnectedTemplate, NotConnectedTemplate, PlayingTemplate, SseTemplate};
+use templates::{ConnectedTemplate, IndexTemplate, NotConnectedTemplate, PlayingTemplate, SseTemplate};
 use tokio::sync::watch::{self};
 use tokio::{self};
 use tokio_stream::StreamExt;
-use tower_http::services::ServeFile;
 
 #[tokio::main]
 async fn main() {
@@ -28,11 +28,10 @@ async fn main() {
         .unwrap();
 
     let app = Router::new()
-        .route("/sse", get(sse_handler::<Lolalytics>))
-        .route_service("/", ServeFile::new("assets/index.html"))
+        .route("/sse/lolalytics", get(sse_handler::<Lolalytics>))
+        .route("/:site_name", get(index_handler))
         .with_state(AppState { lcu_state_rx });
 
-    // serve
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -41,10 +40,26 @@ struct AppState {
     lcu_state_rx: watch::Receiver<LCUState>,
 }
 
+async fn index_handler(Path(url): Path<String>, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let response = IndexTemplate {
+        site_name: url,
+        query_string: params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<String>>()
+            .join("&"),
+    }
+    .render()
+    .unwrap();
+
+    (axum::http::StatusCode::OK, Html(response).into_response())
+}
+
 async fn sse_handler<T: StatisticsUrlProducer>(
     State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = tokio_stream::wrappers::WatchStream::new(state.lcu_state_rx).map(|state| {
+    let stream = tokio_stream::wrappers::WatchStream::new(state.lcu_state_rx).map(move |state| {
         let data = match state {
             LCUState::NotConnected => NotConnectedTemplate.render_sse().unwrap(),
             LCUState::Connected => ConnectedTemplate.render_sse().unwrap(),
@@ -52,7 +67,7 @@ async fn sse_handler<T: StatisticsUrlProducer>(
                 champion,
                 game_mode,
             } => PlayingTemplate {
-                url: T::get_url(&champion, &game_mode),
+                url: T::get_url(&champion, &game_mode, &params),
             }
             .render_sse()
             .unwrap(),

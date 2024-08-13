@@ -1,6 +1,13 @@
 use askama::Template;
 
 #[derive(Template)]
+#[template(path = "index.html")]
+pub struct IndexTemplate {
+    pub site_name: String,
+    pub query_string: String,
+}
+
+#[derive(Template)]
 #[template(path = "not-connected.html")]
 pub struct NotConnectedTemplate;
 

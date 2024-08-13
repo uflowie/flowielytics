@@ -10,7 +10,7 @@
     <script src="https://unpkg.com/htmx.org@1.9.11"></script>
     <script src="https://unpkg.com/htmx.org@1.9.11/dist/ext/sse.js"></script>
     
-    <div hx-ext="sse" sse-connect="/sse" sse-swap="message">
+    <div hx-ext="sse" sse-connect="/sse/{{ site_name }}?{{ query_string }}" sse-swap="message">
     </div>
 
 </body>
