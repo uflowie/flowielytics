@@ -32,7 +32,13 @@ async fn main() {
         .route("/:site_name", get(index_handler))
         .with_state(AppState { lcu_state_rx });
 
-    axum::serve(listener, app).await.unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    open::that("http://127.0.0.1:3000/lolalytics").unwrap();
+
+    handle.await.unwrap();
 }
 
 #[derive(Clone)]
