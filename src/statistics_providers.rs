@@ -23,7 +23,7 @@ impl StatisticsUrlProducer for Lolalytics {
         match game_mode {
             "CLASSIC" => format!("https://lolalytics.com/lol/{champion}/build/?patch={patch}"),
             _ => {
-                let game_mode = game_mode.replace(" ", "").replace("'", "");
+                let game_mode = game_mode.replace(" ", "").to_lowercase();
                 format!("https://lolalytics.com/lol/{champion}/{game_mode}/build/?patch={patch}")
             }
         }
