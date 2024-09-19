@@ -1,6 +1,7 @@
 #[derive(Clone, Debug)]
 pub enum LCUState {
     NotConnected,
+    Connected,
     Playing { champion: String, game_mode: String },
 }
 

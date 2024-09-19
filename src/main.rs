@@ -68,6 +68,7 @@ async fn sse_handler<T: StatisticsUrlProducer>(
     let stream = tokio_stream::wrappers::WatchStream::new(state.lcu_state_rx).map(move |state| {
         let data = match state {
             LCUState::NotConnected => NotConnectedTemplate.render_sse().unwrap(),
+            LCUState::Connected => ConnectedTemplate.render_sse().unwrap(),
             LCUState::Playing {
                 champion,
                 game_mode,
