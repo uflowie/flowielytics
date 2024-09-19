@@ -25,9 +25,7 @@ pub trait SseTemplate {
     fn render_sse(&self) -> askama::Result<String>;
 }
 
-impl<T> SseTemplate for T
-where
-    T: Template,
+impl<T: Template> SseTemplate for T
 {
     fn render_sse(&self) -> askama::Result<String> {
         self.render()

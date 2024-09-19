@@ -1,4 +1,4 @@
-mod lcu_client;
+mod lcu;
 mod statistics_providers;
 mod templates;
 
@@ -12,7 +12,7 @@ use axum::{
     Router,
 };
 use futures::stream::Stream;
-use lcu_client::{run_lcu_client, LCUState};
+use lcu::state::LCUState;
 use statistics_providers::{Lolalytics, StatisticsUrlProducer};
 use templates::{ConnectedTemplate, IndexTemplate, NotConnectedTemplate, PlayingTemplate, SseTemplate};
 use tokio::sync::watch::{self};
@@ -21,7 +21,7 @@ use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
-    let lcu_state_rx = run_lcu_client().await;
+    let lcu_state_rx = lcu::get_state_rx().await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
