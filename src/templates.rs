@@ -12,10 +12,6 @@ pub struct IndexTemplate {
 pub struct NotConnectedTemplate;
 
 #[derive(Template)]
-#[template(path = "connected.html")]
-pub struct ConnectedTemplate;
-
-#[derive(Template)]
 #[template(path = "playing.html")]
 pub struct PlayingTemplate {
     pub url: String,

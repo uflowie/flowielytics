@@ -14,7 +14,7 @@ use axum::{
 use futures::stream::Stream;
 use lcu::state::LCUState;
 use statistics_providers::{Lolalytics, StatisticsUrlProducer};
-use templates::{ConnectedTemplate, IndexTemplate, NotConnectedTemplate, PlayingTemplate, SseTemplate};
+use templates::{IndexTemplate, NotConnectedTemplate, PlayingTemplate, SseTemplate};
 use tokio::sync::watch::{self};
 use tokio::{self};
 use tokio_stream::StreamExt;
@@ -68,7 +68,6 @@ async fn sse_handler<T: StatisticsUrlProducer>(
     let stream = tokio_stream::wrappers::WatchStream::new(state.lcu_state_rx).map(move |state| {
         let data = match state {
             LCUState::NotConnected => NotConnectedTemplate.render_sse().unwrap(),
-            LCUState::Connected => ConnectedTemplate.render_sse().unwrap(),
             LCUState::Playing {
                 champion,
                 game_mode,
