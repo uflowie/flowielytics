@@ -2,7 +2,7 @@ mod lcu;
 mod statistics_providers;
 mod templates;
 
-use std::{collections::HashMap, convert::Infallible};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr};
 
 use askama::Template;
 use axum::{
@@ -11,6 +11,7 @@ use axum::{
     routing::get,
     Router,
 };
+use clap::{arg, command, Parser};
 use futures::stream::Stream;
 use lcu::state::LCUState;
 use statistics_providers::{Lolalytics, StatisticsUrlProducer};
@@ -19,11 +20,24 @@ use tokio::sync::watch::{self};
 use tokio::{self};
 use tokio_stream::StreamExt;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, default_value_t = 3000)]
+    port: u16,
+
+    #[arg(short = 'n', long = "no-browser")]
+    no_browser: bool,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    
     let lcu_state_rx = lcu::get_state_rx().await;
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap();
 
@@ -36,7 +50,10 @@ async fn main() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    open::that("http://127.0.0.1:3000/lolalytics").unwrap();
+    if !args.no_browser {
+        let url = format!("http://{}/lolalytics", addr);
+        open::that(url).unwrap();
+    }
 
     handle.await.unwrap();
 }
