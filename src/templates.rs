@@ -8,8 +8,8 @@ pub struct IndexTemplate {
 }
 
 #[derive(Template)]
-#[template(path = "not-connected.html")]
-pub struct NotConnectedTemplate;
+#[template(path = "not-playing.html")]
+pub struct NotPlayingTemplate;
 
 #[derive(Template)]
 #[template(path = "playing.html")]
@@ -21,8 +21,7 @@ pub trait SseTemplate {
     fn render_sse(&self) -> askama::Result<String>;
 }
 
-impl<T: Template> SseTemplate for T
-{
+impl<T: Template> SseTemplate for T {
     fn render_sse(&self) -> askama::Result<String> {
         self.render()
             .map(|x| x.chars().filter(|&c| c != '\n' && c != '\r').collect())
