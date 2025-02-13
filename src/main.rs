@@ -1,10 +1,9 @@
-mod lcu;
+mod lcu_connector;
 mod statistics_providers;
 mod templates;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr};
 
-use crate::lcu::connector::GameState;
 use askama::Template;
 use axum::{
     extract::{Path, Query, State},
@@ -16,6 +15,7 @@ use axum::{
     Router,
 };
 use clap::{arg, command, Parser};
+use lcu_connector::GameState;
 use futures::stream::Stream;
 use statistics_providers::{Lolalytics, StatisticsUrlProducer};
 use templates::{IndexTemplate, NotPlayingTemplate, PlayingTemplate, SseTemplate};
@@ -38,7 +38,7 @@ async fn main() {
     let args = Args::parse();
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
 
-    let lcu_state_rx = lcu::connector::get_state_rx().await;
+    let lcu_state_rx = lcu_connector::get_state_rx().await;
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 

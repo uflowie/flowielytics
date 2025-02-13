@@ -3,19 +3,49 @@ use base64::{engine::general_purpose, Engine};
 use futures::{future::join_all, SinkExt, Stream};
 use http::{HeaderMap, HeaderValue};
 use native_tls::TlsConnector;
+use serde::{de::IgnoredAny, Deserialize};
 use sysinfo::System;
 use tokio::sync::watch;
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
-use crate::lcu::models::{LCUEvent, LCUResource};
-
-use super::{models::Gameflow, models::Summoner};
-
 #[derive(Clone, Eq, PartialEq)]
 pub struct GameState {
     pub champion_name: String,
     pub game_mode_name: String,
+}
+
+pub async fn get_state_rx() -> watch::Receiver<Option<GameState>> {
+    let (tx, rx) = watch::channel(None);
+    let mut sys = System::new_all();
+    let mut tracker = GameStateTracker {
+        tx,
+        champion_name: None,
+        game_mode_name: None,
+    };
+
+    tokio::spawn(async move {
+        loop {
+            let Some((token, port)) = get_token_and_port(&mut sys).await else {
+                continue;
+            };
+
+            if let Some(game_state) = try_get_current_game_state(&token, &port).await {
+                tracker.update_game_state(game_state);
+            }
+
+            if let Ok(mut stream) = get_event_stream(&token, &port).await {
+                while let Some(event) = stream.next().await {
+                    match event {
+                        PlayingEvent::ChampionName(name) => tracker.update_champion_name(name),
+                        PlayingEvent::GameModeName(name) => tracker.update_game_mode_name(name),
+                    }
+                }
+            }
+        }
+    });
+
+    rx
 }
 
 struct GameStateTracker {
@@ -65,39 +95,6 @@ impl GameStateTracker {
                 .unwrap();
         }
     }
-}
-
-pub async fn get_state_rx() -> watch::Receiver<Option<GameState>> {
-    let (tx, rx) = watch::channel(None);
-    let mut sys = System::new_all();
-    let mut tracker = GameStateTracker {
-        tx,
-        champion_name: None,
-        game_mode_name: None,
-    };
-
-    tokio::spawn(async move {
-        loop {
-            let Some((token, port)) = get_token_and_port(&mut sys).await else {
-                continue;
-            };
-
-            if let Some(game_state) = try_get_current_game_state(&token, &port).await {
-                tracker.update_game_state(game_state);
-            }
-
-            if let Ok(mut stream) = get_event_stream(&token, &port).await {
-                while let Some(event) = stream.next().await {
-                    match event {
-                        PlayingEvent::ChampionName(name) => tracker.update_champion_name(name),
-                        PlayingEvent::GameModeName(name) => tracker.update_game_mode_name(name),
-                    }
-                }
-            }
-        }
-    });
-
-    rx
 }
 
 async fn get_token_and_port(sys: &mut System) -> Option<(String, String)> {
@@ -245,4 +242,44 @@ async fn get_event_stream(token: &str, port: &str) -> Result<impl Stream<Item = 
         });
 
     Ok(stream)
+}
+
+#[derive(Deserialize)]
+struct LCUEvent(i32, String, LCUEventData);
+
+#[derive(Deserialize)]
+struct LCUEventData {
+    data: LCUResource,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LCUResource {
+    Summoner(Summoner),
+    Gameflow(Gameflow),
+    Other(IgnoredAny),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Summoner {
+    is_self: bool,
+    champion_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Gameflow {
+    game_data: GameData,
+}
+
+#[derive(Deserialize)]
+struct GameData {
+    queue: Queue,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Queue {
+    game_mode: String,
 }
