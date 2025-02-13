@@ -1,2 +1,2 @@
 pub mod connector;
-mod ws_models;
+mod models;

@@ -1,13 +1,16 @@
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine};
-use futures::{SinkExt, Stream};
+use futures::{future::join_all, SinkExt, Stream};
+use http::{HeaderMap, HeaderValue};
 use native_tls::TlsConnector;
 use sysinfo::System;
 use tokio::sync::watch;
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
-use crate::lcu::ws_models::{LCUEvent, LCUResource};
+use crate::lcu::models::{LCUEvent, LCUResource};
+
+use super::{models::Gameflow, models::Summoner};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct GameState {
@@ -117,6 +120,7 @@ async fn get_token_and_port(sys: &mut System) -> Option<(String, String)> {
 
         if let (Some(token), Some(port)) = (token, port) {
             println!("port: {}", port);
+            let token = general_purpose::STANDARD.encode(format!("riot:{}", token));
             return Some((token, port));
         }
 
@@ -126,7 +130,61 @@ async fn get_token_and_port(sys: &mut System) -> Option<(String, String)> {
 }
 
 async fn try_get_current_game_state(token: &str, port: &str) -> Option<GameState> {
-    None
+    let mut champion_name = None;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Basic {}", token)).unwrap(),
+    );
+
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    let tasks = (0..10).map(|id| {
+        let url = format!("https://127.0.0.1:{port}/lol-champ-select/v1/summoners/{id}");
+        let client = &client;
+        async move {
+            let response = client.get(&url).send().await?;
+            let summoner = response.json::<Summoner>().await?;
+            anyhow::Result::Ok(summoner)
+        }
+    });
+
+    let results: Vec<anyhow::Result<_>> = join_all(tasks).await;
+
+    for result in results.into_iter().flatten() {
+        if result.is_self {
+            champion_name = Some(result.champion_name);
+        }
+    }
+
+    let game_mode_name = client
+        .get(&format!(
+            "https://127.0.0.1:{}/lol-gameflow/v1/session",
+            port
+        ))
+        .send()
+        .await
+        .ok()?
+        .json::<Gameflow>()
+        .await
+        .ok()?
+        .game_data
+        .queue
+        .game_mode;
+
+    if let Some(champion_name) = champion_name {
+        Some(GameState {
+            champion_name,
+            game_mode_name,
+        })
+    } else {
+        None
+    }
 }
 
 enum PlayingEvent {
@@ -135,10 +193,7 @@ enum PlayingEvent {
 }
 
 async fn get_event_stream(token: &str, port: &str) -> Result<impl Stream<Item = PlayingEvent>> {
-    let token = general_purpose::STANDARD.encode(format!("riot:{}", token));
     let auth = format!("Basic {}", token);
-
-    println!("auth token: {}", auth);
 
     let ws_addr = format!("wss://127.0.0.1:{}", port);
     let mut request = ws_addr.into_client_request()?;
