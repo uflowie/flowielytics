@@ -56,34 +56,38 @@ struct GameStateTracker {
 
 impl GameStateTracker {
     fn update_champion_name(&mut self, name: String) {
-        if name.is_empty() {
+        if name.is_empty() || self.champion_name.as_ref() == Some(&name) {
             return;
         }
 
         self.champion_name = Some(name);
-        self.notify_if_modified();
+        self.notify_if_game_state_present();
     }
 
     fn update_game_mode_name(&mut self, name: String) {
-        if name.is_empty() {
+        if name.is_empty() || self.game_mode_name.as_ref() == Some(&name) {
             return;
         }
 
         self.game_mode_name = Some(name);
-        self.notify_if_modified();
+        self.notify_if_game_state_present();
     }
 
     fn update_game_state(&mut self, state: GameState) {
-        if state.champion_name.is_empty() || state.game_mode_name.is_empty() {
+        if state.champion_name.is_empty()
+            || state.game_mode_name.is_empty()
+            || self.champion_name.as_ref() == Some(&state.champion_name)
+                && self.game_mode_name.as_ref() == Some(&state.game_mode_name)
+        {
             return;
         }
 
         self.champion_name = Some(state.champion_name);
         self.game_mode_name = Some(state.game_mode_name);
-        self.notify_if_modified();
+        self.notify_if_game_state_present();
     }
 
-    fn notify_if_modified(&mut self) {
+    fn notify_if_game_state_present(&mut self) {
         if let (Some(champion_name), Some(game_mode_name)) =
             (&self.champion_name, &self.game_mode_name)
         {
@@ -116,12 +120,10 @@ async fn get_token_and_port(sys: &mut System) -> Option<(String, String)> {
         }
 
         if let (Some(token), Some(port)) = (token, port) {
-            println!("port: {}", port);
             let token = general_purpose::STANDARD.encode(format!("riot:{}", token));
             return Some((token, port));
         }
 
-        println!("Couldn't find auth token, sleeping for 1 second");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
